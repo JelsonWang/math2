@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:math2:daily-return:1.0",
+  "title": "ChatGPT formative daily return; never a teacher certificate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "record_kind", "release_id", "date", "source_state_hash", "presented_items", "attempts", "repair_events", "retest_events", "time_summary", "review", "declarations"],
+  "properties": {
+    "version": {"const": "1.0"},
+    "record_kind": {"enum": ["REAL", "SYNTHETIC_TEST_ONLY"]},
+    "release_id": {"$ref": "#/$defs/id"},
+    "date": {"type": "string", "format": "date"},
+    "source_state_hash": {"$ref": "#/$defs/hash"},
+    "presented_items": {"type": "array", "maxItems": 500, "items": {"$ref": "#/$defs/presented"}},
+    "attempts": {"type": "array", "maxItems": 500, "items": {"$ref": "#/$defs/attempt"}},
+    "repair_events": {"type": "array", "maxItems": 500, "items": {"$ref": "#/$defs/repair"}},
+    "retest_events": {"type": "array", "maxItems": 500, "items": {"$ref": "#/$defs/retest"}},
+    "time_summary": {"type": "object", "additionalProperties": false, "required": ["activity_window_seconds", "verified_net_seconds", "feedback_seconds", "specialty_seconds", "review_seconds"], "properties": {
+      "activity_window_seconds": {"$ref": "#/$defs/seconds"}, "verified_net_seconds": {"type": "null"},
+      "feedback_seconds": {"$ref": "#/$defs/seconds"}, "specialty_seconds": {"$ref": "#/$defs/seconds"}, "review_seconds": {"$ref": "#/$defs/seconds"}
+    }},
+    "review": {"type": "object", "additionalProperties": false, "required": ["summary", "unresolved", "next_actions"], "properties": {
+      "summary": {"type": "string", "minLength": 1, "maxLength": 100000},
+      "unresolved": {"type": "array", "maxItems": 500, "items": {"type": "string", "minLength": 1, "maxLength": 3000}},
+      "next_actions": {"type": "array", "maxItems": 500, "items": {"type": "string", "minLength": 1, "maxLength": 3000}}
+    }},
+    "declarations": {"type": "object", "additionalProperties": false, "required": ["teacher_signatures", "official_exam_score", "certified_h0", "certified_m4"], "properties": {
+      "teacher_signatures": {"const": false}, "official_exam_score": {"type": "null"}, "certified_h0": {"const": false}, "certified_m4": {"const": false}
+    }}
+  },
+  "$defs": {
+    "id": {"type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$"},
+    "hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "timestamp": {"type": ["string", "null"], "format": "date-time"},
+    "seconds": {"type": ["number", "null"], "minimum": 0, "maximum": 604800},
+    "asset": {"type": "object", "additionalProperties": false, "required": ["path", "sha256"], "properties": {
+      "path": {"type": "string", "minLength": 1, "maxLength": 500}, "sha256": {"$ref": "#/$defs/hash"}
+    }},
+    "assets": {"type": "array", "maxItems": 50, "items": {"$ref": "#/$defs/asset"}},
+    "presented": {"type": "object", "additionalProperties": false, "required": ["item_id", "item_version", "presented_at", "exposure"], "properties": {
+      "item_id": {"$ref": "#/$defs/id"}, "item_version": {"$ref": "#/$defs/hash"}, "presented_at": {"$ref": "#/$defs/timestamp"},
+      "exposure": {"enum": ["CONFIRMED_SEEN", "UNKNOWN_POSSIBLY_EXPOSED"]}
+    }},
+    "divergence": {"type": ["object", "null"], "additionalProperties": false, "required": ["location", "student", "correction", "cause"], "properties": {
+      "location": {"type": "string", "minLength": 1, "maxLength": 1000}, "student": {"type": "string", "minLength": 1, "maxLength": 5000},
+      "correction": {"type": "string", "minLength": 1, "maxLength": 5000}, "cause": {"type": "string", "minLength": 6, "maxLength": 5000}
+    }},
+    "grade": {"type": "object", "additionalProperties": false, "required": ["status", "score", "max_points", "confidence", "first_divergence", "step_scores"], "properties": {
+      "status": {"enum": ["FORMATIVE_AI_PROVISIONAL", "PENDING_HUMAN_REVIEW"]}, "score": {"type": ["number", "null"], "minimum": 0, "maximum": 150},
+      "max_points": {"type": "number", "exclusiveMinimum": 0, "maximum": 150}, "confidence": {"enum": ["LOW", "MEDIUM", "HIGH", "UNKNOWN"]},
+      "first_divergence": {"$ref": "#/$defs/divergence"},
+      "error_codes": {"type": "array", "uniqueItems": true, "maxItems": 8, "items": {"enum": ["R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8"]}},
+      "dimensions": {"type": "object", "additionalProperties": false, "properties": {
+        "R": {"type": ["string", "null"], "maxLength": 1000}, "T": {"type": ["string", "null"], "maxLength": 1000}, "M": {"type": ["string", "null"], "maxLength": 1000},
+        "C": {"type": ["string", "null"], "maxLength": 1000}, "F": {"type": ["string", "null"], "maxLength": 1000}
+      }},
+      "step_scores": {"type": "array", "maxItems": 100, "items": {
+        "type": "object", "additionalProperties": false, "required": ["step_id", "earned", "maximum", "reason"], "properties": {
+          "step_id": {"$ref": "#/$defs/id"}, "earned": {"type": ["number", "null"], "minimum": 0, "maximum": 150},
+          "maximum": {"type": "number", "exclusiveMinimum": 0, "maximum": 150}, "reason": {"type": "string", "minLength": 1, "maxLength": 5000}
+        }
+      }}
+    }},
+    "supplement": {"type": "object", "additionalProperties": false, "required": ["supplement_id", "raw", "assets", "received_at", "relation_to_feedback"], "properties": {
+      "supplement_id": {"$ref": "#/$defs/id"}, "raw": {"type": "string", "maxLength": 100000}, "assets": {"$ref": "#/$defs/assets"},
+      "received_at": {"$ref": "#/$defs/timestamp"}, "relation_to_feedback": {"enum": ["BEFORE_FEEDBACK", "AFTER_FEEDBACK", "UNKNOWN"]}
+    }},
+    "time_evidence": {"type": "object", "additionalProperties": false, "required": ["kind", "started_at", "ended_at", "paused_seconds", "source_ref"], "properties": {
+      "kind": {"enum": ["USER_REPORTED", "EXPORTED_CHAT_METADATA", "TIMER_LOG"]}, "started_at": {"type": "string", "format": "date-time"},
+      "ended_at": {"type": "string", "format": "date-time"}, "paused_seconds": {"type": "number", "minimum": 0, "maximum": 604800},
+      "source_ref": {"type": "string", "minLength": 1, "maxLength": 1000}
+    }},
+    "attempt": {"type": "object", "additionalProperties": false,
+      "required": ["attempt_id", "item_id", "item_version", "first_answer", "hint_level", "exposure_declaration", "grade", "feedback_at", "net_seconds", "completion", "abandon_reason", "supplements"],
+      "properties": {
+        "attempt_id": {"$ref": "#/$defs/id"}, "item_id": {"$ref": "#/$defs/id"}, "item_version": {"$ref": "#/$defs/hash"},
+        "first_answer": {"type": "object", "additionalProperties": false, "required": ["raw", "assets", "received_at"], "properties": {
+          "raw": {"type": "string", "maxLength": 100000}, "assets": {"$ref": "#/$defs/assets"}, "received_at": {"$ref": "#/$defs/timestamp"}
+        }},
+        "hint_level": {"type": "integer", "minimum": 0, "maximum": 5}, "exposure_declaration": {"enum": ["UNSEEN_SELF_DECLARED", "CONFIRMED_SEEN", "UNKNOWN_POSSIBLY_EXPOSED"]},
+        "grade": {"$ref": "#/$defs/grade"}, "feedback_at": {"$ref": "#/$defs/timestamp"}, "net_seconds": {"$ref": "#/$defs/seconds"},
+        "time_evidence": {"$ref": "#/$defs/time_evidence"}, "completion": {"enum": ["COMPLETE", "PARTIAL", "ABANDONED"]},
+        "abandon_reason": {"type": ["string", "null"], "minLength": 1, "maxLength": 3000}, "supplements": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/supplement"}}
+      }
+    },
+    "repair": {"type": "object", "additionalProperties": false, "required": ["event_id", "repair_id", "origin_attempt_id", "status", "actual_answer", "item_id", "at"], "properties": {
+      "event_id": {"$ref": "#/$defs/id"}, "repair_id": {"$ref": "#/$defs/id"}, "origin_attempt_id": {"anyOf": [{"$ref": "#/$defs/id"}, {"type": "null"}]},
+      "status": {"enum": ["PLANNED", "STARTED", "IN_PROGRESS", "ATTEMPTED", "FORMATIVE_PASSED", "DELAYED_PENDING"]},
+      "actual_answer": {"type": ["string", "null"], "minLength": 1, "maxLength": 100000}, "item_id": {"anyOf": [{"$ref": "#/$defs/id"}, {"type": "null"}]},
+      "item_version": {"anyOf": [{"$ref": "#/$defs/hash"}, {"type": "null"}]}, "at": {"$ref": "#/$defs/timestamp"}
+    }},
+    "retest": {"type": "object", "additionalProperties": false, "required": ["event_id", "cohort_id", "stage", "attempt_id", "outcome", "at"], "properties": {
+      "event_id": {"$ref": "#/$defs/id"}, "cohort_id": {"$ref": "#/$defs/id"}, "stage": {"enum": ["D0", "D3", "D7", "D14"]},
+      "attempt_id": {"$ref": "#/$defs/id"}, "outcome": {"enum": ["FORMATIVE_PASS", "FAIL", "PENDING"]}, "at": {"$ref": "#/$defs/timestamp"}
+    }}
+  }
+}

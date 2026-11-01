@@ -1,0 +1,20 @@
+name: Validate offline file workflow
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  synthetic-only:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements-file-workflow.lock
+      - run: python -m pytest -q
+      - run: python -m math2_pack --help
+      # Deliberately no scheduled learner-state updates or daily training builds.
+      # Private-bank integration tests explicitly skip when the bank is absent.

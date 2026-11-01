@@ -1,0 +1,11 @@
+# 公开仓库边界
+
+GitHub用于通用代码与版本管理，不是学生做题入口。用户现有math2首次检查为public；未经确认不会上传题库、教师答案、未曝光题、真实成绩、手写答卷、原始附件、真实结转或访问凭证。
+
+公开允许清单：math2_pack通用代码、schemas、prompts、tests_file合成测试、工程说明与无学情的CI配置。私有集成测试从本机银行读取事实，源代码不嵌入个人成绩。无private bank的公开CI会如实跳过相应集成，不宣称已审核题库。
+
+本地完整交付ZIP是给用户的私有资料，不作为公开GitHub Release或Actions工件上传。records/private、verified_bank/private_*、releases、RETURN_CARD_EXAMPLE、原四包及legacy快照都被忽略。Git提交前必须检查staged文件清单、疑似凭证和私有答案标记。
+
+上传ChatGPT的学生包与教练包均由用户控制；文件系统本地保密与聊天里的教学不提前揭示是两回事，不应承诺绝对物理隔离。无法随返回卡导出的照片必须记录SOURCE_NOT_ATTACHED，不伪造文件路径或哈希。
+
+本地hash链验证的是文件一致性，不证明聊天时间、用户独立性或教师身份。所有ChatGPT评分均为暂定形成性，正式未见试卷和长期认证仍需要独立证据。
