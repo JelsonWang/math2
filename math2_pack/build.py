@@ -46,7 +46,7 @@ def build_daily(bank,ledger,date=None,output=None,budget=170,mode='COACH_BUNDLE_
         row=load_json(file)
         if row.get('date','')<date and row['release_id'] not in {r['release_id'] for r in state.get('imported_returns',{}).values()}:previous.append(row['release_id'])
     if previous and not allow_unreturned:raise ValueError('MISSING_PREVIOUS_RETURN：此前训练包尚无真实结转；导入后再生成，或显式--allow-unreturned生成未更新基线。')
-    plan=plan_day(bank.items(),state,budget)
+    plan=plan_day(bank.items(),state,budget,date=date)
     base=Path(output or ROOT/'releases')
     if output and not base.exists():
         folder=base
