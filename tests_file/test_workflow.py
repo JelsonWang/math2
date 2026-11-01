@@ -164,6 +164,34 @@ def test_missing_previous_return_stops_and_override_does_not_claim_adaptation(wo
     assert ledger.replay()['source_state_hash']==before
 
 
+@pytest.mark.parametrize('returned_version',[0,1,None],ids=['actual-v1','actual-v2','no-version-returned'])
+def test_alternative_same_day_versions_require_only_the_actually_used_return(workflow,returned_version):
+    bank,ledger,root=workflow
+    _,first=build_one(bank,ledger,root,date='2026-01-01')
+    _,second=build_one(bank,ledger,root,date='2026-01-01')
+    assert first['release_id']!=second['release_id']
+    versions=[first,second]
+    if returned_version is None:
+        before=ledger.path.read_bytes()
+        with pytest.raises(ValueError,match='MISSING_PREVIOUS_RETURN'):
+            build_one(bank,ledger,root,date='2026-01-02')
+        assert ledger.path.read_bytes()==before
+        assert ledger.replay()['imported_returns']=={} and ledger.replay()['attempts']=={}
+        return
+    actual=versions[returned_version]
+    ledger.import_return(card_for(actual,bank),actual,bank)
+    before=ledger.replay()
+    imported={row['release_id'] for row in before['imported_returns'].values()}
+    assert imported=={actual['release_id']}
+    _,next_release=build_one(bank,ledger,root,date='2026-01-02')
+    after=ledger.replay()
+    assert next_release['adaptation_status']=='FROM_ACTUAL_IMPORTED_STATE'
+    assert next_release['source_state_hash']==before['source_state_hash']
+    assert after['imported_returns']==before['imported_returns']
+    assert len(after['attempts'])==len(actual['schedule'])
+    assert versions[1-returned_version]['release_id'] not in imported
+
+
 def test_unknown_times_survive_import_and_fake_net_time_is_rejected(workflow):
     bank,ledger,root=workflow
     _,release=build_one(bank,ledger,root)

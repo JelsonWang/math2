@@ -42,9 +42,13 @@ def build_daily(bank,ledger,date=None,output=None,budget=170,mode='COACH_BUNDLE_
     if qa['status']!='PASS':raise ValueError('Bank exact-version QA failed: '+str(qa.get('errors')))
     state=ledger.replay()
     previous=[]
+    # Same-day releases are alternatives. Only an actual imported return counts
+    # as training evidence; unused versions must neither block the next day nor
+    # be recorded as having been practised.
+    returned_dates={row['date'] for row in state.get('imported_returns',{}).values()}
     for file in (ledger.folder/'releases').glob('*.json'):
         row=load_json(file)
-        if row.get('date','')<date and row['release_id'] not in {r['release_id'] for r in state.get('imported_returns',{}).values()}:previous.append(row['release_id'])
+        if row.get('date','')<date and row.get('date') not in returned_dates:previous.append(row['release_id'])
     if previous and not allow_unreturned:raise ValueError('MISSING_PREVIOUS_RETURN：此前训练包尚无真实结转；导入后再生成，或显式--allow-unreturned生成未更新基线。')
     plan=plan_day(bank.items(),state,budget,date=date)
     base=Path(output or ROOT/'releases')
