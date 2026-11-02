@@ -98,13 +98,33 @@ def validate_return(card, release, bank, state):
     if not all(isinstance(x, dict) for x in (release, state)):
         error("CONTEXT", "$", "Release and prior state must be JSON objects")
         return {"errors": errors, "warnings": warnings, "normalized": None}
-    for field in ("release_id", "date", "source_state_hash", "record_kind"):
+    for field in ("release_id", "source_state_hash", "record_kind"):
         if card[field] != release.get(field):
             error("RELEASE_BINDING", field, "Card differs from registered release: " + field)
+    if card['date']!=release.get('date'):
+        if card.get('release_date')!=release.get('date') or card['date']<release.get('date',''):
+            error('RELEASE_BINDING','release_date','A different actual date requires the unchanged original release_date')
+        else:warning('ACTUAL_TRAINING_DATE_DIFFERS','date','Original release and state hash are preserved')
+    elif card.get('release_date',release.get('date'))!=release.get('date'):
+        error('RELEASE_BINDING','release_date','Original release date cannot be rewritten')
+    reported=set(card.get('reported_answered_item_ids',[]))
+    actual={a['item_id'] for a in card['attempts']}
+    missing=reported-actual
+    if card.get('submission_scope')=='COMPLETE_SESSION':
+        if 'reported_answered_item_ids' not in card:
+            error('COMPLETE_SCOPE_REQUIRES_ANSWER_INVENTORY','reported_answered_item_ids','Declare the actual answered inventory; planned items are not automatically attempted')
+        if actual-reported:
+            error('ANSWER_INVENTORY_CONFLICT','reported_answered_item_ids','Actual attempts must match the declared answered inventory')
+    if missing:error('INCOMPLETE_ATTEMPT_COVERAGE','attempts','Missing first answers: '+','.join(sorted(missing)))
+    if card.get('submission_scope')!='COMPLETE_SESSION':
+        warning('PARTIAL_STATE_ONLY','submission_scope','Not certified as a complete session export')
     if card["record_kind"] != state.get("record_kind"):
         error("REAL_SYNTHETIC_ISOLATION", "record_kind", "Synthetic and real records cannot be mixed")
     if card["source_state_hash"] != state.get("source_state_hash"):
-        error("STALE_STATE", "source_state_hash", "Return is not based on the current learning state")
+        if state.get('pending_audit_release_bases',{}).get(card['release_id'])==card['source_state_hash']:
+            warning('AUDIT_ONLY_STATE_DELTA','source_state_hash','Only a secondary audit followed this release; original binding retained')
+        else:
+            error("STALE_STATE", "source_state_hash", "Return is not based on the current learning state")
     if state.get("last_training_date") and card["date"] < state["last_training_date"]:
         error("RETROACTIVE_DAILY_RETURN", "date", "A new daily return cannot silently rewrite earlier training days")
     if release.get("version") != "1.0":
@@ -229,6 +249,8 @@ def validate_return(card, release, bank, state):
                 from .mathsafe import check_answer
                 try:
                     checked = check_answer(item, first["raw"])
+                    if 'REFERENCE_MATH_CONFLICT' in checked.get('error_codes',[]):
+                        error('REFERENCE_MATH_CONFLICT',path+'.grade','Stop scoring and independently review the reference')
                     if checked.get("correct") is False or checked.get("result_correct") is False:
                         error("MATH_GRADE_CONTRADICTION", path + ".grade", "Released mathematical constraints contradict the imported full-score claim")
                     elif checked.get("correct") is not True and checked.get("result_correct") is not True:

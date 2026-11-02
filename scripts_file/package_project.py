@@ -6,7 +6,7 @@ import json
 import zipfile
 
 ROOT=Path(__file__).resolve().parents[1]
-FOLDERS=('math2_pack','schemas','prompts','tests_file','scripts_file','verified_bank','records/private','releases','DAILY_DEMO_001','SPECIALTY_DEMO','RETURN_CARD_EXAMPLE','FILE_WORKFLOW_DEMO_001','evidence/file_workflow','vendor/file_wheels','legacy_webapp','inputs/package_0','historical_evidence','.github')
+FOLDERS=('math2_pack','schemas','prompts','tests_file','scripts_file','verified_bank','records/private','releases','DAILY_DEMO_001','SPECIALTY_DEMO','RETURN_CARD_EXAMPLE','FILE_WORKFLOW_DEMO_001','evidence/file_workflow','audit/remediation_20261102','vendor/file_wheels','legacy_webapp','inputs/package_0','historical_evidence','.github')
 FILES=('README.md','README_开始使用.md','AGENTS.md','pyproject.toml','requirements-file-workflow.txt','requirements-file-workflow.lock','MIGRATION_NOTES.md','PRIVACY_AND_GITHUB.md','CHATGPT_RUN_PROTOCOL.md','RUN_TODAY_IN_CHATGPT.md','LICENSE','.gitignore')
 
 def package(output):

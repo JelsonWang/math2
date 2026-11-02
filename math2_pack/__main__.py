@@ -71,6 +71,12 @@ def parser():
     coverage=sub.add_parser('coverage-report',help='查看真实已发/已答、67节点观察与候选供给');coverage.add_argument('--budget',type=int,default=170);coverage.add_argument('--output')
     export=sub.add_parser('export-history',help='从hash链重算并导出本地历史');export.add_argument('--output',required=True)
     verify=sub.add_parser('verify-release',help='校验发布目录或最终交付清单');verify.add_argument('--folder',required=True)
+    supply=sub.add_parser('supply-report',help='七日供题与59节点预测，不改变学情')
+    supply.add_argument('--date',default=client_date());supply.add_argument('--budget',type=int,default=170);supply.add_argument('--output',required=True)
+    audit=sub.add_parser('import-audit',help='保存有来源的二级训练审计，绝不伪装原始答卷')
+    audit.add_argument('--file',required=True);audit.add_argument('--source',required=True);audit.add_argument('--output',required=True)
+    candidates=sub.add_parser('review-candidates',help='核验完整新题载荷并输出新私有bank，不覆盖当前版本')
+    candidates.add_argument('--file',required=True);candidates.add_argument('--output',required=True)
     return p
 
 def main(argv=None):
@@ -78,11 +84,23 @@ def main(argv=None):
     try:
         ledger=Ledger(args.records)
         if args.command=='verify-release':result=verify_daily(args.folder)
+        elif args.command=='import-audit':
+            from .evidence import import_audit,export_audit
+            report=load_json(args.file);source=Path(args.source).read_bytes()
+            result=import_audit(ledger,report,source)
+            result['export']=export_audit(report,source,args.output)
         elif args.command=='export-history':
             state=ledger.export(args.output);result={'status':'EXPORTED','ledger_events':state['ledger_events'],'attempt_count':len(state['attempts']),'path':args.output}
         else:
             bank=Bank(args.bank) if args.bank else Bank()
-            if args.command=='init':
+            if args.command=='review-candidates':
+                from .candidates import review_candidates
+                result=review_candidates(bank,args.file,args.output)
+            elif args.command=='supply-report':
+                from .quality import supply_report
+                result=supply_report(bank.items(),ledger.replay(),args.date,args.budget)
+                write_json(args.output,result)
+            elif args.command=='init':
                 state=ledger.initialize(bank,'SYNTHETIC_TEST_ONLY' if args.synthetic else 'REAL');result={'status':'INITIALIZED','record_kind':state['record_kind'],'attempt_count':len(state['attempts']),'nodes':len(state['nodes']),'state_hash':state['source_state_hash']}
             elif args.command=='validate':
                 if args.daily_folder:result=verify_daily(args.daily_folder)
@@ -99,9 +117,11 @@ def main(argv=None):
                 result=ledger.import_return(card,release,bank,assets=assets,return_source={'bytes':original,'suffix':'.zip' if Path(args.file).suffix.lower()=='.zip' else '.json'})
                 if args.next_date:result['next_day']=build_daily(bank,ledger,args.next_date,args.output,args.budget)
             elif args.command=='coverage-report':
+                from .session import exam_report
                 state=ledger.replay();plan=plan_day(bank.items(),state,args.budget)
                 issued={f for a in state['attempts'].values() for f in bank.get(a['item_id']).get('families',[])}
                 result={'status':'FORMATIVE_EVIDENCE_ONLY','planned':plan,'actual_answered_families':sorted(issued),'attempt_count':len(state['attempts']),'nodes':state['nodes'],'h0_certified':False,'m4_certified':False}
+                result['exam_evidence']=exam_report(bank.items(),state)
                 if args.output:write_json(args.output,result)
             else:raise ValueError('Unknown command')
         print(json.dumps(result,ensure_ascii=False,indent=2,allow_nan=False))

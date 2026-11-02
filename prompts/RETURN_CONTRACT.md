@@ -22,7 +22,7 @@ grade：status 只用 FORMATIVE_AI_PROVISIONAL / PENDING_HUMAN_REVIEW；score �
 
 completion：COMPLETE / PARTIAL / ABANDONED，按真实完整性而不是正确率填写。不会或省略用 abandon_reason 保留本人原因。supplements 中每次追加保留 supplement_id、raw、assets、received_at 与 relation_to_feedback=BEFORE_FEEDBACK / AFTER_FEEDBACK / UNKNOWN；首答原文和证据等级不能被补页替换。
 
-repair_events：每次真实状态变化一条 {event_id, repair_id, origin_attempt_id, status, actual_answer, item_id, at}。已知当前专项题版本时附 Schema 允许的 item_version；不能自行编造哈希。status 只用 PLANNED / STARTED / IN_PROGRESS / ATTEMPTED / FORMATIVE_PASSED / DELAYED_PENDING；无本人实际回答时 actual_answer=null；未核验外部时间 at=null。
+repair_events：每次真实状态变化一条 {event_id, repair_id, origin_attempt_id, status, actual_answer, item_id, at}。已知当前专项题版本时附 Schema 允许的 item_version；不能自行编造哈希。status 只用 PLANNED / STARTED / IN_PROGRESS / ATTEMPTED / FORMATIVE_PASSED / DELAYED_PENDING；无本人实际回答时 actual_answer=null，机器事件只记PLANNED，已展示但未作答的细节写复盘；未核验外部时间 at=null。
 
 retest_events：每次真实事件 {event_id, cohort_id, stage, attempt_id, outcome, at}，stage 为 D0 / D3 / D7 / D14，outcome 为 FORMATIVE_PASS / FAIL / PENDING。无真实阶段记录保持空数组；不预造迟测通过。
 
@@ -30,4 +30,6 @@ time_summary：activity_window_seconds、verified_net_seconds、feedback_seconds
 
 review：summary、unresolved 数组、next_actions 数组；正文写日终 Markdown。declarations 固定 {teacher_signatures:false, official_exam_score:null, certified_h0:false, certified_m4:false}。
 
-date 取 release 对应的实际训练日；实际日期与 release 不一致时先指出差异，由构建端更正/复核，不自行假造匹配日期。跨日、暂停或时刻未知时保留真实证据差异，不能假定天天连续；迟测不能把同日作答改写事件日期拼成跨日。source_state_hash 只复制输入值，不能宣称聊天里变成了新的已导入源状态。完全空白模板只是待填写表，不是学习证据；离线导入会拒绝 EMPTY_RETURN_NOT_LEARNING_EVIDENCE。
+date 取有证据的实际训练日；与发布日不一致时，release_date逐字保留原发布日，release_id及source_state_hash不变，提交离线日期校验，禁止重写原release。跨日、暂停或时刻未知时保留真实证据差异，不能假定天天连续；迟测不能把同日作答改写事件日期拼成跨日。source_state_hash 只复制输入值，不能宣称聊天里变成了新的已导入源状态。完全空白模板只是待填写表，不是学习证据；离线导入会拒绝 EMPTY_RETURN_NOT_LEARNING_EVIDENCE。
+
+COMPLETE_SESSION 必须附 reported_answered_item_ids，准确声明实际作答清单并全部导出。提前结束时，未开始的计划题保留未开始，不为凑全计划虚构作答。只有二级报告时使用独立REPORTED_SESSION，不填造first_answer。

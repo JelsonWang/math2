@@ -139,6 +139,12 @@ def check_answer(item, raw):
     # Revalidate at grading, even if an in-memory caller altered a published dict.
     if item_digest(item)!=item.get("version_hash"):
         result["error_codes"]=["CONTENT_VERSION_MISMATCH"]; return result
+    try:
+        validate_math(item)
+    except Exception as exc:
+        result["error_codes"]=["REFERENCE_MATH_CONFLICT"]
+        result["review_reason"]=str(exc)
+        return result
     if not isinstance(raw,str) or len(raw)>20000 or not raw.strip():
         result.update(score=0, correct=False, error_codes=["BLANK_OR_INVALID"], first_divergence={"field":"submission","student":"空白或超长","expected":"独立作答及明确终值","cause":"尚无可核验答案"}); return result
     def no_duplicate_keys(pairs):
@@ -183,6 +189,7 @@ def check_answer(item, raw):
         result["error_codes"]=["UNSUPPORTED_ANSWER_FIELDS"]
         result["first_divergence"]={"field":sorted(extras)[0],"student":str(answers[sorted(extras)[0]])[:200],"expected":"只允许题面明确要求的答案字段；其余文字作为原答保留待审","cause":"额外终值或自由过程可能与结构答案矛盾，拒绝自动得分"}
         return result
+    weights={r['field']:r['points'] for r in item['rubric']}
     correct_count=0
     for name,field in item["expected"].items():
         present=name in answers
@@ -192,7 +199,7 @@ def check_answer(item, raw):
             if present: detail="结构化结果核验一致" if ok else "表达式、条件、维数或矩阵约束不成立"
         except (ValueError,TypeError,s.ShapeError,ZeroDivisionError,OverflowError) as exc:
             ok=False; detail="无法可靠核验："+str(exc)
-        result["field_results"].append(dict(field=name,correct=bool(ok),present=present,detail=detail,points=item["max_points"]/len(expected_keys) if ok else 0,confidence="SYMBOLIC_CONSTRAINT_CHECK"))
+        result["field_results"].append(dict(field=name,correct=bool(ok),present=present,detail=detail,points=weights[name] if ok else 0,confidence="SYMBOLIC_CONSTRAINT_CHECK"))
         if not ok:
             result["dimensions"][field["dimension"]]="BREAKPOINT"
         elif result["dimensions"][field["dimension"]]!="BREAKPOINT":
@@ -201,7 +208,7 @@ def check_answer(item, raw):
         elif result["first_divergence"] is None:
             result["first_divergence"]={"field":name,"student":answers.get(name,"未填写"),"expected":field["value"],"cause":detail,"dimension":field["dimension"]}
     all_present=all(k in answers for k in expected_keys)
-    result.update(grade_status="FORMATIVE_AI_PROVISIONAL",score=round(item["max_points"]*correct_count/len(expected_keys),3),complete=all_present,correct=correct_count==len(expected_keys),process_verified=False,provided_equalities_verified=bool(work),first_divergence_scope="STRUCTURED_FIELD_OR_EXPLICIT_EQUALITY_ONLY")
+    result.update(grade_status="FORMATIVE_AI_PROVISIONAL",score=round(sum(f['points'] for f in result['field_results']),3),complete=all_present,correct=correct_count==len(expected_keys),process_verified=False,provided_equalities_verified=bool(work),first_divergence_scope="STRUCTURED_FIELD_OR_EXPLICIT_EQUALITY_ONLY")
     if not result["correct"]: result["error_codes"]=["R6_CHAIN_BREAK" if not all_present else "R7_RESULT_MISMATCH"]
     if work_text.strip():
         # Visible mathematics in a free narrative may contradict an otherwise
@@ -257,6 +264,50 @@ def validate_math(item):
         A=matrix(model["A"]); eig=sorted([k for k,n in A.eigenvals().items() for _ in range(n)])
         got={"Lambda":eig,"pd":int(all(v>0 for v in eig))}
         if "det" in item["expected"]: got["det"]=A.det()
+        if "standard_form" in item['expected']:
+            got['standard_form']=sum(e*SYMBOLS[v]**2 for e,v in zip(eig,('x','y','z')))
+    elif typ=='symbolic_tasks':
+        # Each task has an executable mathematical definition, independent of
+        # expected answers and prose. No arbitrary code or SymPy eval accepted.
+        for name, task in model['tasks'].items():
+            op=task['op'];v=SYMBOLS.get(task.get('variable','x'))
+            if op=='integral':
+                value=expression(task['expr'])
+                for var,lo,hi in task['bounds']:
+                    value=s.integrate(value,(SYMBOLS[var],expression(lo),expression(hi)))
+                got[name]=value
+            elif op=='derivative':
+                value=expression(task['expr'])
+                for var,order in task.get('partials',[[task.get('variable','x'),task.get('order',1)]]):
+                    value=s.diff(value,SYMBOLS[var],order)
+                value=value.subs({SYMBOLS[k]:expression(val) for k,val in task.get('values',{}).items()})
+                got[name]=value.subs(v,expression(task['at'])) if 'at' in task else value
+            elif op=='limit':got[name]=s.limit(expression(task['expr']),v,expression(task['at']),dir=task.get('direction','+-'))
+            elif op in ('choice_limit','choice_determinant'):
+                value=(s.limit(expression(task['expr']),v,expression(task['at']))
+                       if op=='choice_limit' else matrix(task['A']).det())
+                labels=[label for label,choice in task['options'].items() if zero(value-expression(choice))]
+                assert len(labels)==1, 'Choice must have exactly one correct option'
+                got[name]=labels[0]
+            elif op=='matrix_power_entry':got[name]=(matrix(task['A'])**task['power'])[task['row'],task['col']]
+            elif op=='determinant':got[name]=matrix(task['A']).det()
+            elif op=='rank':got[name]=matrix(task['A']).rank()
+            elif op=='positive_definite':
+                value=matrix(task['A']).is_positive_definite
+                assert value is not None, 'Positive definiteness unresolved'
+                got[name]=int(value)
+            elif op in ('inertia_positive','inertia_negative'):
+                A=matrix(task['A']);assert A==A.T, 'Inertia requires a symmetric matrix'
+                _,D=A.LDLdecomposition(hermitian=False)
+                got[name]=sum(1 for k in range(D.rows) if (D[k,k]>0 if op=='inertia_positive' else D[k,k]<0))
+            elif op=='substitute':got[name]=expression(task['expr']).subs({SYMBOLS[k]:expression(val) for k,val in task['values'].items()})
+            elif op=='ode_solution':
+                candidate=expression(item['expected'][name]['value'])
+                assert zero(sum(expression(c)*s.diff(candidate,x,k) for k,c in enumerate(task['coeffs']))-expression(task['rhs'])), 'ODE residual'
+                at,*initial=task['initial']
+                for k,value in enumerate(initial):assert zero(s.diff(candidate,x,k).subs(x,expression(at))-expression(value)), 'ODE initial'
+                got[name]=candidate
+            else:raise AssertionError('Unsupported mathematical task: '+op)
     elif typ=="scalar_limit": got={"value":s.limit(expression(model["expr"]),x,0)}
     elif typ=="derivative":
         d=s.diff(expression(model["expr"]),x);got={"d":d,"v":d.subs(x,0)}
@@ -275,5 +326,8 @@ def validate_math(item):
         else: raise AssertionError(f"Unverified {item['id']} {key}")
         checks.append(key)
     assert sum(r["points"] for r in item["rubric"])==item["max_points"] or abs(sum(r["points"] for r in item["rubric"])-item["max_points"])<1e-8
+    assert len(item['rubric'])==len(item['expected']) and {r['field'] for r in item['rubric']}==set(item['expected']), 'Rubric fields mismatch'
+    for eq in item.get('solution',{}).get('checked_equalities',[]):
+        assert zero(expression(eq['lhs'])-expression(eq['rhs'])), 'Reference derivation false equality'
     assert len(item["solution"]["solution_steps"])>=3
     return {"id":item["id"],"fields_recomputed":checks,"status":"PASS","human_review":"NOT_PERFORMED","h0_eligible":False}

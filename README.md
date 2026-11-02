@@ -6,7 +6,7 @@
 
 1. 从Codex领取当天学生ZIP、教练ZIP和RUN_TODAY_IN_CHATGPT.md。
 2. 在ChatGPT网页版新聊天上传当天两个ZIP，粘贴运行提示词。ChatGPT必须先确认读到文件，再一次只发一道题。
-3. 拍照或文字作答；封存首答后接受逐式讲解、首错定位和实际专项互动。困难时先修复一个主要断点，不把生成专项说明当作已经学会。
+3. 拍照或文字作答；封存首答后接受首错定位和必要数学解释。专项互动自愿；选择“下一题/不要额外验证”后持续遵循，不把讲解或生成专项说明当作已经学会。
 4. 结课默认得到深入复盘，下载DAILY_RETURN日期.json、复盘Markdown、作答JSONL、专项状态和返回ZIP。
 5. 把返回文件交给Codex；它校验、原子导入并生成下一训练日包。你不需要每天修改代码。
 
@@ -24,6 +24,9 @@ python -m math2_pack build-daily --date 2026-11-01 --output releases
 python -m math2_pack import-return --file C:\Private\DAILY_RETURN_20261101.json --next-date 2026-11-02 --output releases
 python -m math2_pack build-specialty --topic Q03 --output releases\specialty-Q03
 python -m math2_pack coverage-report --output C:\Private\coverage.json
+python -m math2_pack supply-report --date 2026-11-03 --output C:\Private\supply.json
+python -m math2_pack review-candidates --file C:\Private\candidates.json --output C:\Private\private_next_catalog.json
+python -m math2_pack import-audit --file C:\Private\REPORTED_SESSION.json --source C:\Private\source.md --output C:\Private\reported-session
 python -m math2_pack export-history --output C:\Private\history.json
 python -m math2_pack verify-release --folder releases\DAILY_20261101_v1
 python -m pytest -q
@@ -38,6 +41,20 @@ python -m pip install --no-index --find-links vendor/file_wheels -r requirements
 可用全局参数`--bank 私有题库路径`和`--records 私有历史目录`，写在子命令前。每条命令都有`--help`，验证失败返回非零。首次init不创建假作答；`--synthetic`只能初始化独立合成账本，不得用于真实records目录。
 
 如果已有前一训练日发布却没有新结转，默认停止声称已更新自适应；确需生成未更新基线时显式加`--allow-unreturned`，输出会标记BASELINE_NO_NEW_RETURN。
+
+## 动态容量和课程门禁
+
+计划预算为120—180分钟，逐项列出`short_7_families`、`long_chain`、`cold_probe`、`retest`、`optional_r3`和`day_end_review`。170分钟的设计槽位为35分钟七族短题、75分钟长链、20分钟冷测、25分钟反馈和15分钟复盘。每个实际单元绑定题号、版本和设计时长，不能把估计当成真实用时，也不能将需12分钟的题压成5分钟来凑容量。
+
+七族短题后继续已供题的长链与冷测；没有题源的槽位列为`unfilled_minutes`，整日状态降为`DEGRADED_FORMATIVE_ONLY`。计划不是强制坐满时间；学生停止时进入完整复盘。R3须核心R2正确完整、时间来源明确、用户愿意且确有题源，不因快速交卷自动升级。
+
+R2校准同时检查真题锚点、当前版本独立数学核验、内容绑定的教师审阅记录和真实独立计时。标签、结构参照或机器核验不等于已校准。`supply-report`输出七日实际候选消耗、缺口、59学科节点预测、节点映射审查和8项跨模块证据规则；预测不写入真实学情。覆盖按`node_fields`与已提交子问计算，单纯挂节点标签不再计覆盖。客观80分与解答70分观察分开，不按日常得分比例预测150分。
+
+## 二级报告和旧版本
+
+只有训练审计报告而缺原始答卷时，用`import-audit`保存有原文引用与真实文件SHA256的`REPORTED_SESSION`。它追加`SECONDARY_AUDIT_IMPORTED`事件，可保守更新曝光、保存评分更正和系统事故，但不创建首答、净时间或完整结转；状态为`PARTIAL_STATE_ONLY`。新包会标记`PARTIAL_REPORT_EXPOSURE_ONLY`，不能宣称已根据完整首答更新自适应。
+
+严格返回的`date`为实际训练日；与原发布日不同须另给不变的`release_date`，并保持原`source_state_hash`。`COMPLETE_SESSION`须逐题覆盖`reported_answered_item_ids`声明的实际作答清单；未开始的计划题不伪装为作答，提前结束也可完整导出实际记录。原答和历史评分不覆盖，报告中的更正另记事件。导入旧发布须用`--bank`指定其原题库文件及manifest，新版本题库不会静默替代旧版。
 
 ## 持久化和真实性
 

@@ -28,6 +28,10 @@ class Ledger:
         if events[0]['kind']!='GENESIS':raise ValueError('Missing genesis')
         state=copy.deepcopy(events[0]['payload'])
         for event in events[1:]:
+            if event['kind']=='SECONDARY_AUDIT_IMPORTED':
+                from .evidence import apply_audit
+                apply_audit(state,event['payload'])
+                continue
             if event['kind']!='DAILY_RETURN_IMPORTED':raise ValueError('Unknown history event')
             self._apply(state,event['payload']['card'],event['payload']['card_hash'],event['payload'].get('node_links',{}))
         state['ledger_head']=events[-1]['event_hash'];state['ledger_events']=len(events)
@@ -95,6 +99,7 @@ class Ledger:
             row['events'].append(copy.deepcopy(event))
         state['imported_returns'][card_hash]={'release_id':card['release_id'],'date':card['date'],'attempt_count':len(card['attempts'])}
         state['last_training_date']=card['date']
+        state.pop('pending_audit_release_bases',None)
 
     def import_return(self,card,release,bank,inject_failure=False,assets=None,return_source=None):
         from .returns import validate_return
@@ -128,7 +133,8 @@ class Ledger:
                 relative='source_returns/'+sha(raw)+suffix
                 atomic_bytes(self.folder/relative,raw)
                 source_artifact={'path':relative,'sha256':sha(raw),'bytes':len(raw)}
-            self._append(events,'DAILY_RETURN_IMPORTED',{'card_hash':card_hash,'card':normalized,'asset_evidence':asset_evidence,'source_artifact':source_artifact,'node_links':{a['attempt_id']:bank.get(a['item_id']).get('nodes',[]) for a in normalized['attempts']}})
+            from .quality import answered_nodes
+            self._append(events,'DAILY_RETURN_IMPORTED',{'card_hash':card_hash,'card':normalized,'asset_evidence':asset_evidence,'source_artifact':source_artifact,'node_links':{a['attempt_id']:sorted(answered_nodes(bank.get(a['item_id']),a)) for a in normalized['attempts']}})
             rebuilt=self.replay();write_json(self.folder/'state.json',rebuilt)
             write_json(self.folder/'returns'/f'{card_hash}.json',normalized)
             return {'status':'IMPORTED_FORMATIVE_ONLY','card_hash':card_hash,'attempt_count':len(normalized['attempts']),'warnings':validated['warnings'],'state_hash':rebuilt['source_state_hash']}

@@ -10,6 +10,9 @@
     "record_kind": {"enum": ["REAL", "SYNTHETIC_TEST_ONLY"]},
     "release_id": {"$ref": "#/$defs/id"},
     "date": {"type": "string", "format": "date"},
+    "release_date": {"type": "string", "format": "date"},
+    "submission_scope": {"enum": ["PARTIAL_STATE_ONLY", "COMPLETE_SESSION"]},
+    "reported_answered_item_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
     "source_state_hash": {"$ref": "#/$defs/hash"},
     "presented_items": {"type": "array", "maxItems": 500, "items": {"$ref": "#/$defs/presented"}},
     "attempts": {"type": "array", "maxItems": 500, "items": {"$ref": "#/$defs/attempt"}},
@@ -73,6 +76,7 @@
     "attempt": {"type": "object", "additionalProperties": false,
       "required": ["attempt_id", "item_id", "item_version", "first_answer", "hint_level", "exposure_declaration", "grade", "feedback_at", "net_seconds", "completion", "abandon_reason", "supplements"],
       "properties": {
+        "submitted_fields": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 160}},
         "attempt_id": {"$ref": "#/$defs/id"}, "item_id": {"$ref": "#/$defs/id"}, "item_version": {"$ref": "#/$defs/hash"},
         "first_answer": {"type": "object", "additionalProperties": false, "required": ["raw", "assets", "received_at"], "properties": {
           "raw": {"type": "string", "maxLength": 100000}, "assets": {"$ref": "#/$defs/assets"}, "received_at": {"$ref": "#/$defs/timestamp"}

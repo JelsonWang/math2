@@ -8,13 +8,13 @@ from math2_pack.planner import due_retest_candidates, plan_day
 
 
 def item(iid,node='SYN-N0',family='F6',structure=None,eligible=True):
-    return {'id':iid,'nodes':[node],'families':[family],'max_points':10,'expected':{'value':{'kind':'expr','value':'7'}},
+    return {'id':iid,'nodes':[node],'node_fields':{node:['value']},'families':[family],'max_points':10,'expected':{'value':{'kind':'expr','value':'7'}},
             'version_hash':'a'*64,'structure_id':structure or iid,'h0_eligible':eligible,'initial_exposure':'CONFIRMED_UNSEEN',
             'release_status':'FORMATIVE_MACHINE_CHECKED','difficulty':{'claim':'R2_CANDIDATE_UNCALIBRATED','calibration_status':'UNKNOWN'},'source':'SYNTHETIC_TEST_ONLY'}
 
 
 def attempt(iid,received='2026-01-01T01:00:00Z',**changes):
-    value={'item_id':iid,'first_answer':{'raw':'SYNTHETIC_TEST_ONLY actual fixture answer','assets':[],'received_at':received},'hint_level':0,
+    value={'item_id':iid,'first_answer':{'raw':'{"value":"7"}','assets':[],'received_at':received},'hint_level':0,
            'completion':'COMPLETE','abandon_reason':None,'exposure_declaration':'UNSEEN_SELF_DECLARED',
            'grade':{'status':'FORMATIVE_AI_PROVISIONAL','score':10,'max_points':10,'first_divergence':None}}
     value.update(changes);return value

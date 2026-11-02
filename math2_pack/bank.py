@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 
 from .mathsafe import digest, item_digest, validate_math
+from .quality import mapping_errors, calibration
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -182,7 +183,8 @@ class Bank:
         node_ids = [n.get("id", n.get("node_id")) for n in nodes]
         if len(nodes) != 67 or len(set(node_ids)) != 67 or any(not n.get("name") or not n.get("module") for n in nodes):
             errors.append("NODE_METADATA_67_REQUIRED")
-        if len(original) != 293 or len(curated) != 21 or len(items) != 314:
+        extensions=[i for i in items if i.get('source')=='LOCAL_REVIEWED_EXTENSION']
+        if len(original) != 293 or len(curated) != 21 or len(items) != 314+len(extensions):
             errors.append(f"ITEM_DENOMINATOR_MISMATCH: originals={len(original)}, curated={len(curated)}, total={len(items)}")
         if sum(i.get("tier") == "TIER2" for i in original) != 190:
             errors.append("TIER2_DENOMINATOR_MUST_BE_190")
@@ -192,7 +194,7 @@ class Bank:
         for item in items:
             if not set(item.get("nodes", [])) <= set(node_ids):
                 errors.append("UNKNOWN_NODE_REFERENCE:" + item["id"])
-        for item in curated:
+        for item in curated+extensions:
             if integrity_failed:
                 # Already frozen: do not treat computations on a changed,
                 # unpublished payload as mathematical release evidence.
@@ -207,6 +209,11 @@ class Bank:
                 if not item.get("structure_id"):
                     raise AssertionError("必须保留结构标识；换数字不是新结构")
                 checks.append(validate_math(item))
+                if item in extensions:
+                    if not item.get('node_fields') or not item.get('training_roles'):
+                        raise AssertionError('新题需子问映射与训练用途')
+                    issues=mapping_errors(item)
+                    if issues:raise AssertionError(';'.join(issues))
             except Exception as exc:
                 errors.append("MATH_QA:" + item.get("id", "?") + ":" + str(exc))
         sources = data.get("sources", {})
@@ -244,6 +251,12 @@ class Bank:
         if missing:
             errors.append("MISSING_DAILY_FAMILY:" + ",".join(missing))
         report = dict(status="PASS" if not errors else "FAIL", scope="PRIVATE_LOCAL_FORMATIVE_EXACT_VERSION_ONLY", schema_version=SCHEMA_VERSION, bank_sha256=bank_sha256, manifest_sha256=manifest_sha256, original_items=len(original), curated_items=len(curated), nodes=len(nodes), tier2_frozen=sum(i.get("tier") == "TIER2" for i in original), mathematical_checks=checks, supply=supply, seven_day_fresh_supply="INSUFFICIENT_VERIFIED_ITEMS", certified_r2_items=0, human_reviews=0, h0_certified=0, production_certification="FROZEN", errors=errors, warnings=["INSUFFICIENT_VERIFIED_R2_ITEMS：现有14道常规题只是未校准形成性候选。", "七族各2道常规候选，不足以支持7天持续陌生训练；已见或题源不足时停止，不造通过。", "ChatGPT文件持有人可以查看教练包；文件工作流不提供服务端保密保证。"])
+        report['extension_items']=len(extensions)
+        report['extension_mathematical_checks']=[r for r in checks if r['id'] in {i['id'] for i in extensions}]
+        report['mathematical_checks']=[r for r in checks if r['id'] in {i['id'] for i in curated}]
+        report['mapping_warnings']=[{'id':i['id'],'issues':mapping_errors(i)} for i in curated if mapping_errors(i)]
+        report['current_qualified_candidate_count']=len(curated)+len(extensions)
+        report['certified_r2_items']=sum(calibration(i)['eligible_r2'] for i in curated+extensions)
         self._validation_cache = {cache_key: copy.deepcopy(report)}
         return report
 

@@ -65,19 +65,22 @@ def build_daily(bank,ledger,date=None,output=None,budget=170,mode='COACH_BUNDLE_
         version+=1;rid=f"DAILY_{date.replace('-','')}_v{version}"
     main=[bank.get(i) for i in plan['schedule']]
     # Teaching reserves are explicit local candidates, not automatically certified new tests.
-    reserves=[i for i in bank.items() if usable(i) and i['id'] not in plan['schedule']]
+    all_items=bank.items();superseded={i.get('supersedes') for i in all_items}
+    reserves=[i for i in all_items if usable(i) and i['id'] not in plan['schedule']
+              and i['id'] not in superseded and _eligibility(state,i,mode)!='CONFIRMED_SEEN'
+              and state.get('exposures',{}).get(i.get('supersedes'),{}).get('state')!='CONFIRMED_SEEN'][:4]
     selected=main+reserves
-    release={'version':'1.0','release_id':rid,'date':date,'record_kind':state['record_kind'],'source_state_hash':state['source_state_hash'],'bank_hash':bank.hash,'mode':mode,'budget_minutes':budget,'minutes':plan['minutes'],'schedule':plan['schedule'],
+    release={'version':'1.0','release_id':rid,'date':date,'record_kind':state['record_kind'],'source_state_hash':state['source_state_hash'],'bank_hash':bank.hash,'mode':mode,'budget_minutes':budget,'minutes':plan['minutes'],'schedule':plan['schedule'],'units':plan['units'],'categories':plan['categories'],'budget_ledger':plan['budget_ledger'],'capacity_status':plan['capacity_status'],
              'item_refs':[{'item_id':i['id'],'item_version':i['version_hash'],'role':'MAINLINE' if i in main else 'BRIDGE' if 'BRIDGE' in i['id'] else 'TRANSFER','families':family_ids(i),'nodes':i.get('nodes',[]),'max_points':i['max_points'],'exposure_eligibility':_eligibility(state,i,mode)} for i in selected],
-             'student_zip':f'STUDENT_{rid}.zip','coach_zip':f'COACH_{rid}.zip','active_item_id':main[0]['id'] if main else None,'warnings':plan['warnings'],'adaptation_status':'BASELINE_NO_NEW_RETURN' if previous else 'FROM_ACTUAL_IMPORTED_STATE',
+             'student_zip':f'STUDENT_{rid}.zip','coach_zip':f'COACH_{rid}.zip','active_item_id':main[0]['id'] if main else None,'warnings':plan['warnings'],'adaptation_status':'PARTIAL_REPORT_EXPOSURE_ONLY' if state.get('reported_sessions') and not state.get('attempts') else 'BASELINE_NO_NEW_RETURN' if previous else 'FROM_ACTUAL_IMPORTED_STATE',
              'certification':'FORMATIVE_ONLY_NO_INSTRUCTOR_SIGNATURE_OR_H0_M4'}
     student=folder/'student';coach=folder/'coach';student.mkdir();coach.mkdir()
     public=[{'public_id':f'ITEM_{n:03d}','order':n,'max_points':i['max_points'],'problem':i['problem']} for n,i in enumerate(main,1)]
     if mode=='ACTIVE_ITEM_STRICT':public=public[:1]
     for row in public:
-        atomic_write(student/'problems'/f"{row['public_id']}.md",f"# 第{row['order']}题（{row['max_points']}分）\n\n{row['problem']}\n\n通用自检：条件、步骤、符号、终式与独立核算。\n")
+        atomic_write(student/'problems'/f"{row['public_id']}.md",f"# 第{row['order']}题（{row['max_points']}分）\n\n{row['problem']}\n\n按题意提交过程与终式；无需强制追加验算练习。\n")
     jsonl(student/'problems_student.jsonl',public)
-    write_json(student/'daily_plan_public.json',{'release_id':rid,'date':date,'budget_minutes':budget,'minutes':plan['minutes'],'planned_problem_count':len(public),'coverage_goal':'高数与线代综合，七族均须实际展示/作答才计实绩','actual_answered':0,'difficulty_status':plan['r2_status'],'exposure_mode':mode,'warnings':plan['warnings']})
+    write_json(student/'daily_plan_public.json',{'release_id':rid,'date':date,'budget_minutes':budget,'minutes':plan['minutes'],'planned_problem_count':len(public),'coverage_goal':'高数与线代综合，七族均须实际展示/作答才计实绩','actual_answered':0,'capacity_status':plan['capacity_status'],'budget_ledger':plan['budget_ledger'],'difficulty_status':plan['r2_status'],'exposure_mode':mode,'warnings':plan['warnings']})
     atomic_write(student/'CHATGPT_STUDENT_START.md',student_start())
     atomic_write(student/'README_今天怎么练.md','打开ChatGPT网页版新聊天，上传当天学生ZIP与教练ZIP，粘贴RUN_TODAY_IN_CHATGPT.md。全程在聊天里作答、拍照和接受讲解，无需安装或打开其他练习软件。\n\n学生ZIP含候选题，教练ZIP含答案；用户可查看文件，因此本模式只能采用可能曝光的形成性记录。请不要提前浏览未来题与答案；这不是密码隔离。ACTIVE_ITEM_STRICT时只上传ACTIVE_COACH包而不上传整套教练包，后续须取得下一题文件。\n')
     teacher_items=[{'item_id':i['id'],'item_version':i['version_hash'],'public_id':next((p['public_id'] for p in public if p['order']<=len(main) and main[p['order']-1]['id']==i['id']),None),'problem':i['problem'],'max_points':i['max_points'],'nodes':i.get('nodes',[]),'families':family_ids(i),'difficulty':i.get('difficulty'),'release_status':i['release_status'],'structure_id':i.get('structure_id'),'role':next(r['role'] for r in release['item_refs'] if r['item_id']==i['id'])} for i in selected]
@@ -85,9 +88,9 @@ def build_daily(bank,ledger,date=None,output=None,budget=170,mode='COACH_BUNDLE_
     jsonl(coach/'solutions_and_rubrics.jsonl',[{'item_id':i['id'],'item_version':i['version_hash'],'solution':i['solution'],'expected':i['expected'],'rubric':i.get('rubric'),'eligibility':'FORMATIVE_ONLY'} for i in selected])
     jsonl(coach/'hint_ladders.jsonl',[{'item_id':i['id'],'levels':i.get('hints',[])} for i in selected])
     jsonl(coach/'independent_transfer_candidates.jsonl',[{'item_id':i['id'],'item_version':i['version_hash'],'structure_id':i.get('structure_id'),'exposure':_eligibility(state,i,mode),'h0_eligible':False,'independence':'CANDIDATE_REQUIRES_EXPOSURE_AND_STRUCTURE_REVIEW'} for i in reserves if 'BRIDGE' not in i['id'] and _eligibility(state,i,mode)!='CONFIRMED_SEEN'])
-    write_json(coach/'error_branching_and_specialty_rules.json',{'states':['PLANNED','STARTED','IN_PROGRESS','ATTEMPTED','FORMATIVE_PASSED','DELAYED_PENDING'],'micro_repair':'仅对最早负号/系数/终值断点做短修，再完整新结构题；不要整章重教。','deep_specialty':'入口/对象/条件断点：原理→最小反例→学生局部回答→完整新题候选→反馈。','one_primary_specialty_at_a_time':True,'lesson_blueprints':bank.specialties(),'state_change_requires_actual_response':True,'current_private_repair_backlog':state.get('repairs',{}),'never_grant_h0_or_m4':True})
+    write_json(coach/'error_branching_and_specialty_rules.json',{'states':['PLANNED','STARTED','IN_PROGRESS','ATTEMPTED','FORMATIVE_PASSED','DELAYED_PENDING'],'micro_repair':'仅建议第一错的可选修复；用户下一题时立即继续，未做不得计通过。','deep_specialty':'入口/对象/条件断点：原理→最小反例→学生局部回答→完整新题候选→反馈。','one_primary_specialty_at_a_time':True,'lesson_blueprints':bank.specialties(),'state_change_requires_actual_response':True,'current_private_repair_backlog':state.get('repairs',{}),'never_grant_h0_or_m4':True})
     write_json(coach/'exposure_preconditions.json',{'mode':mode,'items':{r['item_id']:r['exposure_eligibility'] for r in release['item_refs']},'seen_history':state['exposures'],'physical_secrecy':False,'required_rule':'显示题面或答案即登记曝光；未知不视作未见；同族换数字不充当独立新结构验收。'})
-    write_json(coach/'private_history_context.json',{'historical_summary':state['history_summary'],'nodes':state['nodes'],'pending_repairs':state['repairs'],'due_retest_candidates':plan['due_retests'],'no_synthetic_attempts':state['record_kind']=='REAL'})
+    write_json(coach/'private_history_context.json',{'historical_summary':state['history_summary'],'nodes':state['nodes'],'pending_repairs':state['repairs'],'due_retest_candidates':plan['due_retests'],'no_synthetic_attempts':state['record_kind']=='REAL','secondary_reported_sessions':state.get('reported_sessions',{}),'secondary_reports_are_not_first_answers':True})
     write_json(coach/'release_context.json',release)
     atomic_write(coach/'CHATGPT_COACH_PROTOCOL.md',coach_protocol())
     from .returns import load_schema
@@ -103,7 +106,7 @@ def build_daily(bank,ledger,date=None,output=None,budget=170,mode='COACH_BUNDLE_
         for name,rows in [('teacher_items.jsonl',teacher_items[:1]),('solutions_and_rubrics.jsonl',[{'item_id':main[0]['id'],'item_version':main[0]['version_hash'],'solution':main[0]['solution'],'expected':main[0]['expected'],'rubric':main[0].get('rubric')}])]:jsonl(active/name,rows)
         atomic_write(active/'CHATGPT_COACH_PROTOCOL.md',coach_protocol())
         write_json(active/'ACTIVE_LIMITS.json',{'item_id':main[0]['id'],'no_future_items_included':True,'next_item_requires_builder':True,'whole_chat_still_not_secret_from_learner':True})
-        active_release=dict(release,item_refs=release['item_refs'][:1],schedule=release['schedule'][:1])
+        active_release=dict(release,item_refs=release['item_refs'][:1],schedule=release['schedule'][:1],units=plan['units'][:1],categories={plan['units'][0]['category']:[main[0]['id']]})
         write_json(active/'RELEASE_MANIFEST.json',{'release':active_release,'scope':'ACTIVE_ITEM_ONLY'})
         write_json(active/'DAILY_RETURN_TEMPLATE.json',return_template(release))
         atomic_write(active/'return_card_schema.json',schema_text)

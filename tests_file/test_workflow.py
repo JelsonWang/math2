@@ -29,12 +29,12 @@ class SyntheticBank:
         for family in range(1,8):
             for variant in ("A","B","BRIDGE"):
                 iid=f"SYN-F{family}-{variant}"
-                value=100+family
+                value=100+family+{"A":0,"B":20,"BRIDGE":40}[variant]
                 row={"id":iid,"problem":f"SYNTHETIC_TEST_ONLY. Define p(t)=t+{value}; compute p(0). Fixture {iid}.","nodes":[f"SYN-NODE-{family}"],"families":[f"F{family}"],"max_points":10,
                      "source":"SYNTHETIC_TEST_ONLY","tier":"SYNTHETIC_TEST_ONLY","release_status":"FORMATIVE_MACHINE_CHECKED","initial_exposure":"NEW_GENERATED_UNSEEN","h0_eligible":False,"structure_id":f"SYN-STRUCTURE-{family}-{variant}",
                      "difficulty":{"claim":"R1_REPAIR" if variant=="BRIDGE" else "R2_CANDIDATE_UNCALIBRATED","calibration_status":"UNKNOWN"},
                      "expected":{"value":{"kind":"expr","value":str(value),"dimension":"F"}},
-                     "solution":{"conceptual_core":"SYNTHETIC_TEACHER_ONLY_"+iid,"solution_steps":[{"result":"Substitute zero in the synthetic function."}]},
+                     "model":{"type":"scalar_limit","expr":f"x+{value}"},"node_fields":{f"SYN-NODE-{family}":["value"]},"solution":{"conceptual_core":"SYNTHETIC_TEACHER_ONLY_"+iid,"solution_steps":[{"result":"Define p."},{"result":"Evaluate at zero."},{"result":"Substitute zero in the synthetic function."}]},
                      "rubric":[{"field":"value","points":10}],"hints":[{"level":1,"text":"SYNTHETIC_HINT_ONLY_"+iid}]}
                 row["version_hash"]=sha(canonical(row));self._items.append(row)
 
@@ -312,7 +312,7 @@ def test_budget_seven_real_family_refs_and_no_planned_actual_credit(workflow,bud
     plan=plan_day(bank.items(),ledger.replay(),budget)
     assert plan['planned_families']==[f'F{n}' for n in range(1,8)]
     assert len(plan['schedule'])==7 and sum(plan['minutes'].values())==budget
-    assert plan['minutes']['review']>=15 and plan['minutes']['specialty']>=20
+    assert plan['minutes']['review']>=15 and plan['minutes']['specialty']==0
     assert plan['actual_issued_families']==plan['actual_answered_families']==[]
     assert plan['r3_allowed'] is False
     for iid in plan['schedule']:assert bank.get(iid)['release_status']=='FORMATIVE_MACHINE_CHECKED'
@@ -338,7 +338,7 @@ def test_fast_abandon_or_pending_never_upgrades_r3(workflow):
     _,release=build_one(bank,ledger,root);card=card_for(release,bank,False)
     attempts=card['attempts']
     assert expansion_decision(attempts,60)['action']=='MORE_R2_TRANSFER'
-    assert expansion_decision(attempts,60,True,True)['action']=='OPTIONAL_R3_TRANSFER'
+    assert expansion_decision(attempts,60,True,True,time_source='USER_REPORTED',willing_r3=True)['action']=='OPTIONAL_R3_TRANSFER'
     attempts[0]['completion']='ABANDONED';attempts[0]['abandon_reason']='SYNTHETIC early stop'
     assert expansion_decision(attempts,120,True,True)['action']=='REPAIR_OR_REVIEW'
     attempts[0]['completion']='COMPLETE';attempts[0]['abandon_reason']=None
@@ -350,7 +350,7 @@ def test_hinted_full_answer_does_not_trigger_harder_independent_transfer(workflo
     bank,ledger,root=workflow
     _,release=build_one(bank,ledger,root);attempts=card_for(release,bank,False)['attempts']
     attempts[0]['hint_level']=1
-    assert expansion_decision(attempts,60,True,True)['action']=='REPAIR_OR_REVIEW'
+    assert expansion_decision(attempts,60,True,True,time_source='USER_REPORTED',willing_r3=True)['action']=='REPAIR_OR_REVIEW'
 
 
 def test_empty_generated_template_cannot_be_imported_as_completed_training(workflow):

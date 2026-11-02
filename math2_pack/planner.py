@@ -2,6 +2,8 @@
 from __future__ import annotations
 import datetime as dt
 from .util import client_date
+from .quality import node_fields, answered_nodes, calibration, semantic_key
+from .mathsafe import digest
 
 FAMILIES={'F1':'极限连续泰勒','F2':'一元微分及证明','F3':'积分及应用','F4':'微分方程','F5':'多元与二重积分','F6':'矩阵向量方程组','F7':'特征值与二次型'}
 
@@ -137,7 +139,7 @@ def _rolling_coverage(items,state,asof):
         if day>asof:future.append(aid);continue
         item=lookup.get(attempt.get('item_id'))
         if item is None:unknown.append(aid);continue
-        dated.append((aid,day,attempt,set(item.get('nodes',[]))))
+        dated.append((aid,day,attempt,answered_nodes(item,attempt)))
     windows={}
     for length in (3,7):
         start=asof-dt.timedelta(days=length-1);inside=[r for r in dated if start<=r[1]<=asof]
@@ -161,36 +163,103 @@ def plan_day(items,state,budget=170,date=None):
     for a in attempts.values():
         if a.get('completion')!='COMPLETE' or a.get('grade',{}).get('first_divergence'):
             for node in lookup.get(a['item_id'],{}).get('nodes',[]):weak[node]=weak.get(node,0)+1
-    pool=[i for i in items if usable(i) and i['id'] not in seen and str(i.get('difficulty',{}).get('claim','')).startswith('R2')]
+    # Reports can conservatively record exposure, but never fabricate attempts.
+    seen |= {i['id'] for i in items if i.get('initial_exposure') == 'CONFIRMED_SEEN'}
+    seen_models={digest(i['model']) for i in items if i['id'] in seen and i.get('model')}
+    pool=[i for i in items if usable(i) and i['id'] not in seen
+          and i['id'] not in {j.get('supersedes') for j in items}
+          and i.get('supersedes') not in seen and i.get('difficulty',{}).get('claim')!='R1_REPAIR']
+    pool=[i for i in pool if not i.get('model') or digest(i['model']) not in seen_models]
     rotation=_rolling_coverage(items,state,asof)
     missing3=set(rotation['windows']['3']['uncovered_nodes']);missing7=set(rotation['windows']['7']['uncovered_nodes'])
-    # Actual recent gaps and errors influence selection while retaining seven families.
+    ever_submitted={n for a in attempts.values() for n in answered_nodes(lookup.get(a.get('item_id'),{}),a)}
     def priority(item):
-        nodes=set(item.get('nodes',[]))
+        nodes=set(node_fields(item))
         return 6*sum(weak.get(n,0) for n in nodes)+2*len(nodes&missing3)+len(nodes&missing7)
     pool.sort(key=lambda i:(-priority(i),i['id']))
-    schedule=[];covered=set()
-    for family in FAMILIES:
-        if family in covered:continue
-        candidate=next((i for i in pool if family in family_ids(i) and i['id'] not in schedule),None)
-        if candidate:
-            schedule.append(candidate['id']);covered.update(family_ids(candidate))
-    missing=sorted(set(FAMILIES)-covered)
-    warning=['INSUFFICIENT_VERIFIED_R2_ITEMS：仅有形成性R2候选，尚未完成真实真题难度锚定及教师全文审校。']
-    if missing:warning.append('INSUFFICIENT_VERIFIED_ITEMS：缺少 '+','.join(missing)+' 未实际展示的新题候选；不把桥题当日常主线。')
-    feedback=40 if budget>=150 else 30;specialty=30 if budget>=150 else 20;review=15
+    qualified={i['id']:calibration(i)['eligible_r2'] for i in pool}
+    schedule=[];units=[];covered=set();structures=set();models=set()
+    # Budget slots remain visible if a source is missing. Missing time is not
+    # silently converted into feedback or marked as delivered training.
+    review=15;feedback=25 if budget>=150 else 20
     due=due_retest_candidates(items,state,date)
     ready=[row for row in due if row['actionable']]
     retest=min(15,len(ready)*5)
-    minutes={'solve':budget-feedback-specialty-review-retest,'feedback':feedback,'specialty':specialty,'retest':retest,'review':review}
-    if len(ready)>3:warning.append('RETEST_OVERFLOW：先保留两科主线/一个主专项/日终，余下复测排队，不自动标通过。')
-    if any(row['status']=='D0_SOURCE_PENDING' for row in due):warning.append('D0_SOURCE_PENDING：缺真实首答日期，未虚构D+3/7/14。')
-    if any(row['status']=='INSUFFICIENT_VERIFIED_ITEMS' for row in due):warning.append('INSUFFICIENT_VERIFIED_ITEMS：受信迟测候选不足，阻断项不挤占今日复测预算。')
-    return {'schedule':schedule,'planned_families':sorted(covered),'missing_families':missing,'minutes':minutes,'budget_minutes':budget,'warnings':warning,'weak_nodes':weak,'due_retests':due,'ready_due_retests':ready,'rotation_3_7':rotation,'selection_priority':{iid:priority(lookup[iid]) for iid in schedule},'actual_issued_families':[],'actual_answered_families':[],'r2_status':'R2_CANDIDATE_UNCALIBRATED','r3_allowed':False}
+    solve=budget-review-feedback-retest
+    short_cap=35 if budget>=150 else 28
+    probe_cap=20 if budget>=150 else 15
+    long_cap=solve-short_cap-probe_cap
+    long_count=3 if long_cap>=60 else 2
+    targets={'short_7_families':short_cap,'long_chain':long_cap,'cold_probe':probe_cap,
+             'retest':retest,'optional_r3':0,'day_end_review':review,'feedback':feedback}
+    def add(candidate,category,target):
+        if candidate is None:return
+        iid=candidate['id'];schedule.append(iid);structures.add(semantic_key(candidate))
+        if candidate.get('model'):models.add(digest(candidate['model']))
+        covered.update(family_ids(candidate))
+        units.append({'item_id':iid,'item_version':candidate['version_hash'],'category':category,
+                      'target_minutes':int(candidate.get('difficulty',{}).get('time_target',target)),'time_source':'DESIGN_ESTIMATE_NOT_OBSERVED',
+                      'format':candidate.get('format','SUBJECTIVE'),
+                      'difficulty_status':'EVIDENCE_CALIBRATED_R2' if qualified.get(iid) else 'FORMATIVE_UNCALIBRATED',
+                      'node_fields':node_fields(candidate),'status':'PLANNED_NOT_STARTED'})
+    def pick(category,family=None,unmeasured=False,max_minutes=None):
+        choices=[i for i in pool if i['id'] not in schedule and semantic_key(i) not in structures
+                 and (not i.get('model') or digest(i['model']) not in models)
+                 and category in i.get('training_roles',['short_7_families'])
+                 and (max_minutes is None or i.get('difficulty',{}).get('time_target',max_minutes)<=max_minutes)
+                 and (family is None or family in family_ids(i))
+                 and (not unmeasured or set(node_fields(i))-ever_submitted)]
+        choices.sort(key=lambda i:(not qualified[i['id']],-priority(i),i['id']))
+        return choices[0] if choices else None
+    for n,family in enumerate(FAMILIES):
+        add(pick('short_7_families',family,max_minutes=short_cap//7+(n<short_cap%7)),'short_7_families',short_cap//7+(n<short_cap%7))
+    for n in range(long_count):
+        add(pick('long_chain',max_minutes=long_cap//long_count+(n<long_cap%long_count)),'long_chain',long_cap//long_count+(n<long_cap%long_count))
+    add(pick('cold_probe',unmeasured=True,max_minutes=probe_cap),'cold_probe',probe_cap)
+    for row in ready[:3]:
+        candidate=lookup.get(row['candidate_item_id'])
+        if candidate and candidate['id'] not in schedule and candidate.get('difficulty',{}).get('time_target',5)<=5:add(candidate,'retest',5)
+    missing=sorted(set(FAMILIES)-covered)
+    certified_long=sum(u['category']=='long_chain' and qualified.get(u['item_id'],False) for u in units)
+    gaps=[]
+    if missing:gaps.append('MISSING_FAMILIES:'+','.join(missing))
+    short_families={f for u in units if u['category']=='short_7_families' for f in family_ids(lookup[u['item_id']])}
+    if set(FAMILIES)-short_families:gaps.append('MISSING_SHORT_FAMILY_SLOTS:'+','.join(sorted(set(FAMILIES)-short_families)))
+    if certified_long<2:gaps.append('INSUFFICIENT_VERIFIED_LONG_CHAIN:need_at_least_2')
+    probes=[u for u in units if u['category']=='cold_probe']
+    if not probes:gaps.append('MISSING_HIGH_VALUE_COLD_PROBE')
+    # Whole-bundle delivery never proves a probe was previously unseen.
+    # Probe status is provisional; full archive exposure never certifies novelty.
+    r2_minutes=sum(u['target_minutes'] for u in units if qualified.get(u['item_id'],False))
+    if r2_minutes<0.70*solve:gaps.append('R2_TIME_SHARE_BELOW_70_PERCENT')
+    ledger=[]
+    for category,target in targets.items():
+        delivered=sum(u['target_minutes'] for u in units if u['category']==category)
+        if category in ('feedback','day_end_review'):delivered=target
+        ledger.append({'category':category,'budget_minutes':target,'sourced_minutes':delivered,
+                       'unfilled_minutes':target-delivered,'actual_minutes':None})
+    warning=list(gaps)
+    if sum(row['sourced_minutes'] for row in ledger)<120:
+        gaps.append('SOURCED_TOTAL_BELOW_120');warning.append('SOURCED_TOTAL_BELOW_120')
+    if not all(qualified.values()) or not pool:warning.append('INSUFFICIENT_VERIFIED_R2_ITEMS:未校准题只供形成性教学，不能冒称真题级。')
+    if any(r['unfilled_minutes'] for r in ledger):warning.append('INSUFFICIENT_VERIFIED_ITEMS:预算槽位没有足量合格题源，允许提前结束并记录缺口。')
+    if len(ready)>3:warning.append('RETEST_OVERFLOW:到期任务排队，不挤占全部主线。')
+    warning.extend(row['status'] for row in due if row['status'] in ('D0_SOURCE_PENDING','INSUFFICIENT_VERIFIED_ITEMS'))
+    minutes={'solve':solve,'feedback':feedback,'specialty':0,'retest':retest,'review':review}
+    return {'schedule':schedule,'units':units,'categories':{k:[u['item_id'] for u in units if u['category']==k] for k in targets},
+            'planned_families':sorted(covered),'missing_families':missing,'minutes':minutes,'budget_minutes':budget,
+            'budget_ledger':ledger,'capacity_status':'DEGRADED_FORMATIVE_ONLY' if gaps else 'READY_CALIBRATED',
+            'capacity_gaps':gaps,'r2_solve_share':r2_minutes/solve if solve else 0,
+            'warnings':warning,'weak_nodes':weak,'due_retests':due,'ready_due_retests':ready,'rotation_3_7':rotation,
+            'selection_priority':{iid:priority(lookup[iid]) for iid in schedule},'actual_issued_families':[],
+            'actual_answered_families':[],'r2_status':'R2_CANDIDATE_UNCALIBRATED' if gaps else 'EVIDENCE_CALIBRATED_R2','r3_allowed':False}
 
-def expansion_decision(attempts,remaining_minutes,calibrated_r2=False,r3_available=False):
+
+def expansion_decision(attempts,remaining_minutes,calibrated_r2=False,r3_available=False, user_stopped=False, time_source="UNKNOWN", willing_r3=False):
+    if user_stopped:return {"action":"END_REVIEW","reason":"用户结束，不强制补足预算"}
+    if remaining_minutes is None:return {"action":"ASK_AVAILABLE_TIME_OR_REVIEW","reason":"时间未知，不推造余量"}
+    if remaining_minutes<15:return {'action':'END_REVIEW','reason':'保留复盘预算'}
     if not attempts or any(a.get('completion')!='COMPLETE' or a.get('hint_level',0)>0 or a.get('grade',{}).get('status')=='PENDING_HUMAN_REVIEW' or a.get('grade',{}).get('score')!=a.get('grade',{}).get('max_points') or a.get('abandon_reason') for a in attempts):
         return {'action':'REPAIR_OR_REVIEW','reason':'未完整/待审/放弃，不因快速交卷自动升级'}
-    if remaining_minutes<15:return {'action':'END_REVIEW','reason':'保留复盘预算'}
-    if calibrated_r2 and r3_available and remaining_minutes>=30:return {'action':'OPTIONAL_R3_TRANSFER','reason':'完整正确且已校准、有余时的有限结构迁移'}
+    if calibrated_r2 and r3_available and remaining_minutes>=30 and willing_r3 and time_source!='UNKNOWN':return {'action':'OPTIONAL_R3_TRANSFER','reason':'完整正确且已校准、有余时的有限结构迁移'}
     return {'action':'MORE_R2_TRANSFER','reason':'先同级不同结构候选，不宣称难度已标定'}
